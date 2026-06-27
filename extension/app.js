@@ -15,7 +15,8 @@ const SYNC_DEBOUNCE_MS = 900;
 const DEFAULT_SHORTCUT_UPDATED_AT = 1700000000000;
 const SEARCH_ENGINES = new Set(['google', 'bing']);
 const SEARCH_HISTORY_LIMIT = 40;
-const SEARCH_HISTORY_RETENTION_DAYS = new Set([0, 7, 30, 90]);
+const SEARCH_HISTORY_RETENTION_DAYS = new Set([-1, 0, 1, 7]);
+const SEARCH_HISTORY_RESTART_SESSION_KEY = 'tomorinSearchHistoryRestartHandled';
 
 const DEFAULT_SHORTCUTS = [
   { title: 'YouTube', url: 'https://www.youtube.com', size: 'small' },
@@ -54,6 +55,7 @@ const DEFAULT_STATE = {
 };
 
 const hasChromeStorage = Boolean(globalThis.chrome?.storage?.local);
+const hasChromeSessionStorage = Boolean(globalThis.chrome?.storage?.session);
 const hasChromeRuntime = Boolean(globalThis.chrome?.runtime?.getURL);
 
 const els = {
@@ -121,7 +123,7 @@ init();
 
 async function init() {
   state = await loadState();
-  if (applySearchHistoryRetention()) await saveState({ sync: false });
+  if (await applySearchHistoryRetention()) await saveState({ sync: false });
   await hydrateShortcutIcons();
   await applyWallpaper();
   bindEvents();
@@ -608,14 +610,16 @@ async function deleteSearchHistoryItem(query) {
 
 async function handleSearchHistoryRetentionChange() {
   state.settings.searchHistoryRetentionDays = normalizeSearchHistoryRetention(els.searchHistoryRetention.value);
-  const changed = applySearchHistoryRetention();
+  const changed = await applySearchHistoryRetention();
   renderSearchHistory();
   await saveState({ sync: false });
   showToast(changed ? '已清理过期搜索历史' : '已更新历史清理周期');
 }
 
-function applySearchHistoryRetention() {
+async function applySearchHistoryRetention() {
   const retentionDays = normalizeSearchHistoryRetention(state.settings.searchHistoryRetentionDays);
+  if (retentionDays === -1) return clearSearchHistoryAfterBrowserRestart();
+
   if (!retentionDays) {
     state.settings.searchHistory = normalizeSearchHistory(state.settings.searchHistory);
     return false;
@@ -626,6 +630,23 @@ function applySearchHistoryRetention() {
   const after = before.filter(item => item.searchedAt >= cutoff);
   state.settings.searchHistory = after;
   return after.length !== before.length;
+}
+
+async function clearSearchHistoryAfterBrowserRestart() {
+  state.settings.searchHistory = normalizeSearchHistory(state.settings.searchHistory);
+  if (!state.settings.searchHistory.length) return false;
+
+  if (!hasChromeSessionStorage) return false;
+
+  try {
+    const marker = await chrome.storage.session.get(SEARCH_HISTORY_RESTART_SESSION_KEY);
+    if (marker?.[SEARCH_HISTORY_RESTART_SESSION_KEY]) return false;
+    await chrome.storage.session.set({ [SEARCH_HISTORY_RESTART_SESSION_KEY]: true });
+    state.settings.searchHistory = [];
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function setSearchHistoryPanelOpen(open) {

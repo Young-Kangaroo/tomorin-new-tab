@@ -485,7 +485,7 @@ button {
 
 .shortcut-card:hover .shortcut-title-text,
 .shortcut-card:focus-visible .shortcut-title-text {
-  animation: shortcut-title-marquee 4.8s ease-in-out 180ms infinite;
+  animation: shortcut-title-marquee 3.2s ease-in-out 140ms infinite;
 }
 
 .shortcut-card.medium .shortcut-title,
